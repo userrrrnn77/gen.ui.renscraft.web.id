@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ESNext"],
+    "strict": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": false,
+    "rootDir": ".",
+    "outDir": "dist",
+    "types": ["bun"],
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["src/**/*", "api/**/*", "server.ts"],
+  "exclude": ["node_modules", "dist"]
+}

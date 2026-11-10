@@ -1,0 +1,36 @@
+# dependencies (bun install)
+node_modules
+
+# output & build
+dist
+build
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+
+# local storage provider (dev folder)
+storage/
+
+# caches & typescript
+.eslintcache
+.cache
+*.tsbuildinfo
+.turbo
+.next
+.vercel
+
+# IDE & OS specific
+.idea
+.DS_Store
+Thumbs.db
