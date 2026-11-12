@@ -90,6 +90,7 @@ export interface ChatResponse {
     message: {
       role: "assistant";
       content: string | null;
+      reasoning_content?: string | null;
       tool_calls?: ToolCall[];
     };
     finish_reason: string | null;
@@ -152,30 +153,59 @@ async function postJson<T>(
 
 // ─── Non-streaming chat ─────────────────────────────────────────────────────
 
+const CHAT_TIMEOUT_MS = 120_000;
+
 export async function chat(
   req: ChatRequest,
   signal?: AbortSignal,
+  timeoutMs: number = CHAT_TIMEOUT_MS,
 ): Promise<ChatResponse> {
   const body = { ...req, stream: false };
-  const external = signal ?? new AbortController().signal;
+
+  const ac = new AbortController();
+  const timer = setTimeout(
+    () => ac.abort(new Error("chat timeout")),
+    timeoutMs,
+  );
+  timer.unref?.();
+
+  const onExtAbort = (): void => ac.abort();
+  if (signal) {
+    if (signal.aborted) ac.abort();
+    else signal.addEventListener("abort", onExtAbort, { once: true });
+  }
+  const effective = ac.signal;
 
   let lastErr: unknown;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    try {
-      return await postJson<ChatResponse>("/chat/completions", body, external);
-    } catch (err) {
-      lastErr = err;
-      if (external.aborted || !isRetriable(err) || attempt === MAX_ATTEMPTS) {
-        throw err;
+  try {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      try {
+        return await postJson<ChatResponse>(
+          "/chat/completions",
+          body,
+          effective,
+        );
+      } catch (err) {
+        lastErr = err;
+        if (
+          effective.aborted ||
+          !isRetriable(err) ||
+          attempt === MAX_ATTEMPTS
+        ) {
+          throw err;
+        }
+        logger.warn(
+          { attempt, status: (err as UpstreamError).status },
+          "chat retry",
+        );
+        await backoff(attempt);
       }
-      logger.warn(
-        { attempt, status: (err as UpstreamError).status },
-        "chat retry",
-      );
-      await backoff(attempt);
     }
+    throw lastErr;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onExtAbort);
   }
-  throw lastErr;
 }
 
 // ─── Streaming chat (async generator) ───────────────────────────────────────

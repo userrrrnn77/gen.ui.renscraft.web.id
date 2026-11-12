@@ -13,12 +13,19 @@ import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { AppError } from "./middleware/error.js";
 import indexRoutes from "./routes/index.js";
+import path from "node:path";
 
 export function buildApp(): express.Express {
   const app = express();
 
   app.disable("x-powered-by");
-  app.use(helmet());
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // Matikan CSP saat development harness agar CDN bisa jalan
+    }),
+  );
+
   app.use(
     cors({
       origin: env.CLIENT_ORIGIN,
@@ -28,6 +35,8 @@ export function buildApp(): express.Express {
   app.use(cookieParser());
   app.use(express.json({ limit: "2mb" }));
   app.use(pinoHttp({ logger }));
+
+  app.use(express.static(path.join(process.cwd(), "public")));
 
   app.use("/api", indexRoutes);
 

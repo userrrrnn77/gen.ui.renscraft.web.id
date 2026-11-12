@@ -1,0 +1,93 @@
+event: message.start
+data: {"messageId":"6af5d0214636510c41dff405","sessionId":"6af5d0214636510c41dff403"}
+
+event: block.start
+data: {"index":0,"block":{"type":"code","language":"ts","content":""}}
+
+event: block.delta
+data: {"index":0,"delta":"function add(a: number"}
+
+event: block.delta
+data: {"index":0,"delta":", b: number): number"}
+
+event: block.delta
+data: {"index":0,"delta":" {\n  return a + b"}
+
+event: block.delta
+data: {"index":0,"delta":";\n}"}
+
+event: block.end
+data: {"index":0,"block":{"type":"code","language":"ts","content":"function add(a: number, b: number): number {\n  return a + b;\n}"}}
+
+event: block.start
+data: {"index":1,"block":{"type":"text","markdown":""}}
+
+event: block.delta
+data: {"index":1,"delta":"\n**Pen"}
+
+event: block.delta
+data: {"index":1,"delta":"jelasan:**  \nF"}
+
+event: block.delta
+data: {"index":1,"delta":"ungsi `add` menerima"}
+
+event: block.delta
+data: {"index":1,"delta":" dua parameter bert"}
+
+event: block.delta
+data: {"index":1,"delta":"ipe `number` (`a"}
+
+event: block.delta
+data: {"index":1,"delta":"` dan `b`), menj"}
+
+event: block.delta
+data: {"index":1,"delta":"umlahk"}
+
+event: block.delta
+data: {"index":1,"delta":"annya dengan operator `+`,"}
+
+event: block.delta
+data: {"index":1,"delta":" lalu mengembalikan hasil"}
+
+event: block.delta
+data: {"index":1,"delta":" pen"}
+
+event: block.delta
+data: {"index":1,"delta":"jumlahan tersebut"}
+
+event: block.delta
+data: {"index":1,"delta":" ("}
+
+event: block.delta
+data: {"index":1,"delta":"bert"}
+
+event: block.delta
+data: {"index":1,"delta":"ipe `number"}
+
+event: block.delta
+data: {"index":1,"delta":"` pula"}
+
+event: block.delta
+data: {"index":1,"delta":"). Contoh pem"}
+
+event: block.delta
+data: {"index":1,"delta":"aka"}
+
+event: block.delta
+data: {"index":1,"delta":"ian: `add(3"}
+
+event: block.delta
+data: {"index":1,"delta":", 5)` meng"}
+
+event: block.delta
+data: {"index":1,"delta":"embalikan `8"}
+
+event: block.delta
+data: {"index":1,"delta":"`."}
+
+event: block.end
+data: {"index":1,"block":{"type":"text","markdown":"\n**Penjelasan:**  \nFungsi `add` menerima dua parameter bertipe `number` (`a` dan `b`), menjumlahkannya dengan operator `+`, lalu mengembalikan hasil penjumlahan tersebut (bertipe `number` pula). Contoh pemakaian: `add(3, 5)` mengembalikan `8`."}}
+
+event: message.end
+data: {"messageId":"6af5d0214636510c41dff405","status":"done","usage":null}
+

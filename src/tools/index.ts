@@ -7,7 +7,9 @@ import type { ToolDefinition } from "../llm/nvidiaClient.js";
 // Side-effect: register tools
 import "./ui.js";
 import "./files.js";
+import "./pdf.js";
 import "./attachments.js";
+import "./terminal.js";
 
 export { getTool, listTools, listToolNames } from "./registry.js";
 export type { ToolContext, ToolResult, ToolDef } from "./registry.js";

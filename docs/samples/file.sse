@@ -1,0 +1,60 @@
+event: message.start
+data: {"messageId":"6af5d03d4636510c41dff40b","sessionId":"6af5d0214636510c41dff403"}
+
+event: tool.start
+data: {"callId":"call-2a3ca4c9-6d4b-4d29-9082-432f920f6efe","name":"create_file"}
+
+event: block.start
+data: {"index":0,"block":{"type":"file","fileId":"6af5d0434636510c41dff40c","name":"README.md","mime":"text/markdown","size":768,"version":1,"preview":"text"}}
+
+event: block.end
+data: {"index":0,"block":{"type":"file","fileId":"6af5d0434636510c41dff40c","name":"README.md","mime":"text/markdown","size":768,"version":1,"preview":"text"}}
+
+event: tool.end
+data: {"callId":"call-2a3ca4c9-6d4b-4d29-9082-432f920f6efe","ok":true,"summary":"create_file ok"}
+
+event: block.start
+data: {"index":1,"block":{"type":"text","markdown":""}}
+
+event: block.delta
+data: {"index":1,"delta":"File **"}
+
+event: block.delta
+data: {"index":1,"delta":"README.md** telah dibuat dan"}
+
+event: block.delta
+data: {"index":1,"delta":" ditampilkan di atas. Is"}
+
+event: block.delta
+data: {"index":1,"delta":"inya berisi desk"}
+
+event: block.delta
+data: {"index":1,"delta":"ripsi proyek,"}
+
+event: block.delta
+data: {"index":1,"delta":" prasyarat,"}
+
+event: block.delta
+data: {"index":1,"delta":" cara instalasi &"}
+
+event: block.delta
+data: {"index":1,"delta":" menjalankan, struktur folder"}
+
+event: block.delta
+data: {"index":1,"delta":", script npm"}
+
+event: block.delta
+data: {"index":1,"delta":" yang"}
+
+event: block.delta
+data: {"index":1,"delta":" tersedia, dan lisensi"}
+
+event: block.delta
+data: {"index":1,"delta":" MIT."}
+
+event: block.end
+data: {"index":1,"block":{"type":"text","markdown":"File **README.md** telah dibuat dan ditampilkan di atas. Isinya berisi deskripsi proyek, prasyarat, cara instalasi & menjalankan, struktur folder, script npm yang tersedia, dan lisensi MIT."}}
+
+event: message.end
+data: {"messageId":"6af5d03d4636510c41dff40b","status":"done","usage":null}
+

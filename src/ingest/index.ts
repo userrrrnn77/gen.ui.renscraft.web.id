@@ -4,11 +4,12 @@ import { Types } from "mongoose";
 import { FileDocModel } from "../models/FileDoc.js";
 import { ChunkModel } from "../models/Chunk.js";
 import { getStorage } from "../storage/index.js";
-import { env } from "../config/env.js";
+import { env, SUMMARY_MODEL } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { extract } from "./extractors/index.js";
 import { chunkText } from "./chunker.js";
 import { chat } from "../llm/nvidiaClient.js";
+import { embedAndStoreChunks } from "./embedder.js";
 
 const CONCURRENCY = 3;
 
@@ -35,24 +36,44 @@ class Semaphore {
 const sem = new Semaphore(CONCURRENCY);
 const inflight = new Set<Promise<void>>();
 
+const SUMMARY_LINE_MAX_TOKENS = 3000;
+const SUMMARY_LINE_TIMEOUT_MS = 60_000;
+
 async function generateSummaryLine(
   doc: { name: string; mime: string },
   text: string,
 ): Promise<string | undefined> {
   try {
-    const res = await chat({
-      model: env.MODEL_FAST,
-      messages: [
+    const res = await chat(
+      {
+        model: SUMMARY_MODEL,
+        messages: [
+          {
+            role: "user",
+            content: `Buat 1 kalimat ringkas (maks 100 karakter) dalam bahasa Indonesia yang menjelaskan isi file "${doc.name}" (${doc.mime}). Fokus pada isi, bukan metadata.\n\nCuplikan:\n${text.slice(0, 1200)}`,
+          },
+        ],
+        max_tokens: SUMMARY_LINE_MAX_TOKENS,
+        temperature: 0.2,
+      },
+      undefined,
+      SUMMARY_LINE_TIMEOUT_MS,
+    );
+    const msg = res.choices[0]?.message;
+    const line = (msg?.content ?? "").trim();
+    if (!line) {
+      logger.warn(
         {
-          role: "user",
-          content: `Buat 1 kalimat ringkas (maks 100 karakter) dalam bahasa Indonesia yang menjelaskan isi file "${doc.name}" (${doc.mime}). Fokus pada isi, bukan metadata.\n\nCuplikan:\n${text.slice(0, 1200)}`,
+          fileId: doc.name,
+          model: SUMMARY_MODEL,
+          finishReason: res.choices[0]?.finish_reason ?? null,
+          reasoningLen: (msg?.reasoning_content ?? "").length,
         },
-      ],
-      max_tokens: 60,
-      temperature: 0.2,
-    });
-    const line = (res.choices[0]?.message.content ?? "").trim();
-    return line && line.length <= 200 ? line : undefined;
+        "summaryLine returned empty content",
+      );
+      return undefined;
+    }
+    return line.length <= 200 ? line : undefined;
   } catch (err) {
     logger.warn({ err }, "summaryLine generation failed");
     return undefined;
@@ -100,7 +121,7 @@ async function processOne(fileId: string): Promise<void> {
         const chunks = chunkText(text);
         await ChunkModel.deleteMany({ fileId: doc._id });
         if (chunks.length > 0) {
-          await ChunkModel.insertMany(
+          const inserted = await ChunkModel.insertMany(
             chunks.map((t, i) => ({
               fileId: doc._id,
               sessionId: doc.sessionId,
@@ -108,6 +129,16 @@ async function processOne(fileId: string): Promise<void> {
               text: t,
             })),
           );
+          // Fire-and-forget embedding. Chunk tetap tersimpan tanpa
+          // embedding kalau gagal — search_attachment fallback ke $text.
+          void embedAndStoreChunks(
+            inserted.map((c) => ({ _id: c._id, text: c.text })),
+          ).catch((err: unknown) => {
+            logger.warn(
+              { err, fileId: doc._id.toString() },
+              "embedChunks fire-and-forget failed",
+            );
+          });
         }
       }
 
@@ -155,4 +186,14 @@ export async function waitForReady(
     await new Promise<void>((r) => setTimeout(r, 500));
   }
   throw new Error("timeout waiting for attachments");
+}
+
+export async function drainIngestion(timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (inflight.size > 0 && Date.now() < deadline) {
+    await new Promise<void>((r) => setTimeout(r, 100));
+  }
+  if (inflight.size > 0) {
+    logger.warn({ remaining: inflight.size }, "ingestion not drained in time");
+  }
 }

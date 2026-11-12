@@ -1,0 +1,41 @@
+event: message.start
+data: {"messageId":"6af5d0254636510c41dff408","sessionId":"6af5d0214636510c41dff403"}
+
+: ping
+
+event: tool.start
+data: {"callId":"call-ea1a77de-0937-416b-940e-a9419e6463fd","name":"render_table"}
+
+event: block.start
+data: {"index":0,"block":{"type":"table","title":"Perbandingan 3 Framework JavaScript Populer","columns":[{"key":"framework","label":"Framework","align":"left"},{"key":"tahunRilis","label":"Tahun Rilis","align":"center"},{"key":"bahasaUtama","label":"Bahasa Utama","align":"left"}],"rows":[{"framework":"React","tahunRilis":2013,"bahasaUtama":"JavaScript (JSX) / TypeScript"},{"framework":"Vue","tahunRilis":2014,"bahasaUtama":"JavaScript / TypeScript"},{"framework":"Angular","tahunRilis":2016,"bahasaUtama":"TypeScript"}]}}
+
+event: block.end
+data: {"index":0,"block":{"type":"table","title":"Perbandingan 3 Framework JavaScript Populer","columns":[{"key":"framework","label":"Framework","align":"left"},{"key":"tahunRilis","label":"Tahun Rilis","align":"center"},{"key":"bahasaUtama","label":"Bahasa Utama","align":"left"}],"rows":[{"framework":"React","tahunRilis":2013,"bahasaUtama":"JavaScript (JSX) / TypeScript"},{"framework":"Vue","tahunRilis":2014,"bahasaUtama":"JavaScript / TypeScript"},{"framework":"Angular","tahunRilis":2016,"bahasaUtama":"TypeScript"}]}}
+
+event: tool.end
+data: {"callId":"call-ea1a77de-0937-416b-940e-a9419e6463fd","ok":true,"summary":"render_table ok"}
+
+event: block.start
+data: {"index":1,"block":{"type":"text","markdown":""}}
+
+event: block.delta
+data: {"index":1,"delta":"Tabel perbandingan"}
+
+event: block.delta
+data: {"index":1,"delta":" ketiga"}
+
+event: block.delta
+data: {"index":1,"delta":" framework tersebut"}
+
+event: block.delta
+data: {"index":1,"delta":" sudah dit"}
+
+event: block.delta
+data: {"index":1,"delta":"ampilkan di atas."}
+
+event: block.end
+data: {"index":1,"block":{"type":"text","markdown":"Tabel perbandingan ketiga framework tersebut sudah ditampilkan di atas."}}
+
+event: message.end
+data: {"messageId":"6af5d0254636510c41dff408","status":"done","usage":null}
+

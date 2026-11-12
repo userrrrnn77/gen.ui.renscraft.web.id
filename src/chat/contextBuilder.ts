@@ -198,14 +198,10 @@ export async function buildContext(
     }
   }
 
-  const currentUserTokens = estimateTokens(input.currentUserText);
-  const systemTokens = systemMessages.reduce(
-    (sum, m) =>
-      sum + (typeof m.content === "string" ? estimateTokens(m.content) : 0),
-    0,
-  );
-
-  let remaining = env.HISTORY_TOKEN_BUDGET - systemTokens - currentUserTokens;
+  // Riwayat punya budget sendiri; system prompt, manifest, dan lampiran
+  // giliran ini tidak memakan jatah riwayat. Lampiran besar (sampai
+  // ATTACH_INLINE_TOKEN_BUDGET) tidak boleh mengosongkan riwayat.
+  let remaining = env.HISTORY_TOKEN_BUDGET;
 
   const kept: ChatMessage[] = [];
   for (let i = input.history.length - 1; i >= 0; i--) {

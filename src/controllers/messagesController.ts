@@ -21,6 +21,10 @@ import { generateTitle } from "../chat/titler.js";
 import { buildToolDefinitions, listToolNames } from "../tools/index.js";
 import { logger } from "../config/logger.js";
 import { waitForReady } from "../ingest/index.js";
+import { maybeSummarize } from "../chat/summarizer.js";
+import { checkSafety } from "../safety/guard.js";
+import { registerStream, unregisterStream } from "../chat/activeStreams.js";
+import type { Block } from "../blocks/schemas.js";
 
 const PostMessageBody = z.object({
   text: z.string().min(1).max(100_000),
@@ -80,6 +84,7 @@ export async function postMessage(req: Request, res: Response): Promise<void> {
   const ping = startPing(sse);
 
   const ac = new AbortController();
+  registerStream(ac);
   const onClose = (): void => {
     if (ac.signal.aborted) return;
     logger.info({ sessionId: session._id.toString() }, "client closed; abort");
@@ -109,9 +114,65 @@ export async function postMessage(req: Request, res: Response): Promise<void> {
       }
     }
 
+    // ─── Safety gate ──────────────────────────────────────────────────
+    let attachmentDigests: Array<{ summary?: string; ocrText?: string }> = [];
+    if (attachmentIds.length > 0) {
+      const attDocs = await FileDocModel.find({
+        _id: { $in: attachmentIds },
+      })
+        .select({ mime: 1, digest: 1 })
+        .lean();
+      attachmentDigests = attDocs
+        .filter((d) => d.mime.startsWith("image/") && d.digest !== undefined)
+        .map((d) => ({
+          summary: d.digest?.summary,
+          ocrText: d.digest?.ocrText,
+        }));
+    }
+
+    const safety = await checkSafety({
+      text: body.text,
+      attachmentDigests,
+    });
+
+    if (!safety.safe) {
+      const refusal: Block = {
+        type: "text",
+        markdown:
+          "Maaf, aku tidak bisa membantu dengan permintaan itu. Silakan ajukan pertanyaan lain.",
+      };
+      sse.send("block.start", { index: 0, block: refusal });
+      sse.send("block.end", { index: 0, block: refusal });
+
+      const refusalMsg = await MessageModel.create({
+        _id: assistantId,
+        sessionId: session._id,
+        userId,
+        role: "assistant",
+        blocks: [refusal],
+        attachmentIds: [],
+        status: "done",
+        tokenEstimate: estimateTokens(refusal.markdown),
+      });
+
+      await SessionModel.updateOne(
+        { _id: session._id },
+        { $set: { lastMessageAt: new Date() } },
+      );
+
+      sse.send("message.end", {
+        messageId: assistantId.toString(),
+        status: refusalMsg.status,
+        usage: null,
+      });
+      return;
+    }
+
+    // ─── Agent loop ───────────────────────────────────────────────────
     const history = await MessageModel.find({
       sessionId: session._id,
       _id: { $ne: userMsg._id },
+      summarized: { $ne: true },
     })
       .sort({ createdAt: 1 })
       .lean();
@@ -194,6 +255,12 @@ export async function postMessage(req: Request, res: Response): Promise<void> {
       { $set: { lastMessageAt: new Date() } },
     );
 
+    if (assistantStatus === "done") {
+      void maybeSummarize(session._id).catch((err: unknown) => {
+        logger.warn({ err }, "maybeSummarize fire-and-forget failed");
+      });
+    }
+
     if (assistantStatus === "done" && session.titleAuto) {
       const priorDoneAssistant = history.some(
         (m) => m.role === "assistant" && m.status === "done",
@@ -225,6 +292,7 @@ export async function postMessage(req: Request, res: Response): Promise<void> {
       message: err instanceof Error ? err.message : String(err),
     });
   } finally {
+    unregisterStream(ac);
     clearInterval(ping);
     req.off("close", onClose);
     res.off("close", onClose);

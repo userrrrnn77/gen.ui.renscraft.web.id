@@ -33,10 +33,17 @@ const EnvSchema = z.object({
     .string()
     .default("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"),
   MODEL_FAST: z.string().default("nvidia/nemotron-3.5-lightning-30b-a3b"),
+  MODEL_SUMMARY: z.string().optional(),
   MODEL_SAFETY: z.string().default("nvidia/nemotron-3.5-content-safety"),
   SAFETY_ENABLED: BoolStr.default(false),
   SHOW_REASONING: BoolStr.default(false),
   TOOL_MODE: z.enum(["native", "json"]).default("native"),
+
+  // Embedding (vector search)
+  EMBEDDING_ENABLED: BoolStr.default(false),
+  EMBEDDING_MODEL: z.string().default("nvidia/nemotron-3.5-embed-8b"),
+  EMBEDDING_DIM: IntStr.positive().default(4096),
+  EMBEDDING_BATCH_SIZE: IntStr.positive().max(128).default(32),
 
   // Limits
   MAX_TOOL_ITERATIONS: IntStr.positive().default(8),
@@ -54,6 +61,7 @@ const EnvSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().min(1),
   R2_BUCKET: z.string().min(1),
   R2_PUBLIC_URL: z.string().min(1).optional(),
+  REDIS_URL: z.string().url().optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -65,3 +73,6 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export type Env = typeof env;
+
+/** Model untuk task helper (judul, summaryLine, rolling summary). */
+export const SUMMARY_MODEL = env.MODEL_SUMMARY ?? env.MODEL_FAST;

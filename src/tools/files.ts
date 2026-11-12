@@ -3,97 +3,9 @@
 import { z } from "zod";
 import { FileDocModel } from "../models/FileDoc.js";
 import { registerTool, okResult, errorResult } from "./registry.js";
-import { getStorage, pickPrefix } from "../storage/index.js";
-import { chunkText } from "../ingest/chunker.js";
-import { ChunkModel } from "../models/Chunk.js";
+import { saveGenerated, previewForMime, guessMime } from "./saveGenerated.js";
 
-const CODE_EXTS = new Set([
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "py",
-  "rb",
-  "go",
-  "rs",
-  "java",
-  "kt",
-  "swift",
-  "c",
-  "h",
-  "cpp",
-  "hpp",
-  "cc",
-  "sh",
-  "sql",
-  "css",
-  "html",
-  "xml",
-  "yaml",
-  "yml",
-  "json",
-  "toml",
-  "ini",
-]);
-
-function sha256Hex(buf: Buffer): string {
-  return new Bun.CryptoHasher("sha256").update(buf).digest("hex");
-}
-
-function previewForMime(
-  mime: string,
-  name: string,
-): "code" | "text" | "image" | "pdf" | "none" {
-  if (mime.startsWith("image/")) return "image";
-  if (mime === "application/pdf") return "pdf";
-  const e = (name.split(".").pop() ?? "").toLowerCase();
-  if (CODE_EXTS.has(e)) return "code";
-  if (mime.startsWith("text/")) return "text";
-  return "none";
-}
-
-function guessMime(name: string): string {
-  const e = (name.split(".").pop() ?? "").toLowerCase();
-  const map: Record<string, string> = {
-    txt: "text/plain",
-    md: "text/markdown",
-    csv: "text/csv",
-    json: "application/json",
-    html: "text/html",
-    xml: "application/xml",
-    yaml: "application/x-yaml",
-    yml: "application/x-yaml",
-    ts: "text/x-typescript",
-    tsx: "text/x-typescript",
-    js: "text/javascript",
-    jsx: "text/javascript",
-    py: "text/x-python",
-    rb: "text/x-ruby",
-    go: "text/x-go",
-    rs: "text/x-rust",
-    java: "text/x-java",
-    c: "text/x-c",
-    h: "text/x-c",
-    cpp: "text/x-c++",
-    sh: "text/x-shellscript",
-    sql: "text/x-sql",
-    css: "text/css",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    svg: "image/svg+xml",
-    pdf: "application/pdf",
-  };
-  return map[e] ?? "text/plain";
-}
-
-function isTextish(mime: string, name: string): boolean {
-  if (mime.startsWith("text/")) return true;
-  const e = (name.split(".").pop() ?? "").toLowerCase();
-  return CODE_EXTS.has(e);
-}
+const MAX_GENERATED_FILE_BYTES = 10 * 1024 * 1024;
 
 // ─── create_file ──────────────────────────────────────────────────────────
 
@@ -115,78 +27,36 @@ registerTool({
     const mime = a.mime ?? guessMime(a.name);
     const buf = Buffer.from(a.content, "utf-8");
 
-    if (buf.length > 10 * 1024 * 1024) {
+    if (buf.length > MAX_GENERATED_FILE_BYTES) {
       return errorResult("FILE_TOO_LARGE", "File exceeds 10MB");
     }
 
-    const existing = await FileDocModel.findOne({
-      sessionId: ctx.sessionId,
-      userId: ctx.userId,
-      name: a.name,
-      origin: "generated",
-    })
-      .sort({ version: -1 })
-      .lean();
-
-    const nextVersion = existing ? existing.version + 1 : 1;
-    const parentId = existing ? existing._id : null;
-
-    const storage = getStorage();
-    const prefix = pickPrefix(mime);
-    const ref = await storage.put(buf, { mime, name: a.name }, prefix);
-
-    const doc = await FileDocModel.create({
+    const saved = await saveGenerated({
       userId: ctx.userId,
       sessionId: ctx.sessionId,
-      origin: "generated",
       name: a.name,
       mime,
-      size: buf.length,
-      sha256: sha256Hex(buf),
-      version: nextVersion,
-      parentFileId: parentId,
-      storage: ref,
-      status: "ready",
+      buf,
     });
-
-    // Chunking + summaryLine untuk file teks/kode — supaya
-    // search_attachment bisa menemukan isi file yang dibuat AI.
-    if (isTextish(doc.mime, doc.name)) {
-      const chunks = chunkText(a.content);
-      if (chunks.length > 0) {
-        await ChunkModel.insertMany(
-          chunks.map((t, i) => ({
-            fileId: doc._id,
-            sessionId: ctx.sessionId,
-            idx: i,
-            text: t,
-          })),
-        );
-      }
-      const firstLine =
-        a.content.split("\n").find((l) => l.trim().length > 0) ?? "";
-      doc.summaryLine = firstLine.slice(0, 120);
-      await doc.save();
-    }
 
     const present = a.present !== false;
     if (present) {
       ctx.emitBlock({
         type: "file",
-        fileId: doc._id.toString(),
-        name: doc.name,
-        mime: doc.mime,
-        size: doc.size,
-        version: doc.version,
-        preview: previewForMime(doc.mime, doc.name),
+        fileId: saved._id.toString(),
+        name: saved.name,
+        mime: saved.mime,
+        size: saved.size,
+        version: saved.version,
+        preview: previewForMime(saved.mime, saved.name),
       });
     }
 
     return okResult({
-      fileId: doc._id.toString(),
-      name: doc.name,
-      version: doc.version,
-      size: doc.size,
+      fileId: saved._id.toString(),
+      name: saved.name,
+      version: saved.version,
+      size: saved.size,
       presented: present,
     });
   },
