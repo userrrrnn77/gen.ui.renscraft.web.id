@@ -2,7 +2,6 @@
 
 import { Types } from "mongoose";
 import {
-  chatStream,
   type ChatMessage,
   type Usage,
   type ToolDefinition,
@@ -11,6 +10,11 @@ import { FenceParser } from "../llm/fenceParser.js";
 import type { Block } from "../blocks/schemas.js";
 import { env } from "../../config/env.js";
 import { BlockEmitter } from "./blockEmitter.js";
+import type { ClarificationQuestion } from "../orchestrator/clarification.js";
+import {
+  ClarificationTimeoutError,
+  ClarificationAbortedError,
+} from "../orchestrator/clarificationStore.js";
 import {
   getTool,
   errorResult,
@@ -19,6 +23,8 @@ import {
   type ToolResult,
   type ToolDef,
 } from "../tools/registry.js";
+import { getProvider, type ReasoningEffort } from "../llm/provider.js";
+import { createThinkingForwarder } from "./thinkingStream.js";
 
 export interface AgentCallbacks {
   onToolStart: (callId: string, name: string) => void;
@@ -31,9 +37,14 @@ export interface AgentInput {
   userId: Types.ObjectId;
   sessionId: Types.ObjectId;
   messageId: Types.ObjectId;
+  model: string;
+  reasoning: ReasoningEffort;
+  maxTokens: number;
+  emitter: BlockEmitter;
   sseSend: (event: string, data: unknown) => void;
   callbacks: AgentCallbacks;
   signal: AbortSignal;
+  askClarification?: (q: ClarificationQuestion) => Promise<string[]>;
 }
 
 export interface AgentResult {
@@ -103,6 +114,14 @@ async function executeWithRepair(
   try {
     return await tool.run(parsed, ctx);
   } catch (err) {
+    // Error klarifikasi harus propagate ke agentLoop (bukan diubah jadi
+    // tool error) — agar turn bisa diakhiri / di-abort dengan benar.
+    if (
+      err instanceof ClarificationTimeoutError ||
+      err instanceof ClarificationAbortedError
+    ) {
+      throw err;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     return errorResult("INVALID_ARGS", `Args tidak sesuai schema: ${msg}`, {
       tool: tool.name,
@@ -111,7 +130,7 @@ async function executeWithRepair(
 }
 
 export async function runAgent(input: AgentInput): Promise<AgentResult> {
-  const emitter = new BlockEmitter(input.sseSend);
+  const emitter = input.emitter;
   const accumulatedToolCalls: Array<{
     id: string;
     name: string;
@@ -124,6 +143,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   let natural = false;
 
   const workingMessages: ChatMessage[] = [...input.messages];
+  const provider = getProvider();
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
     if (input.signal.aborted) {
@@ -138,34 +158,53 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     });
 
     const toolCallAcc = new Map<number, PartialToolCall>();
+    const thinking = createThinkingForwarder(input.sseSend, {
+      enabled: env.SHOW_REASONING,
+    });
+
     let iterError: string | undefined;
     let iterContent = "";
+    let firstContentOrToolSeen = false;
 
     try {
-      const stream = chatStream(
-        {
-          model: env.MODEL_MAIN,
-          messages: workingMessages,
-          ...(input.tools.length > 0
-            ? { tools: input.tools, tool_choice: "auto" as const }
-            : {}),
-          max_tokens: env.MAX_OUTPUT_TOKENS,
-        },
-        input.signal,
-      );
+      const stream = provider.streamCompletion({
+        model: input.model,
+        messages: workingMessages,
+        ...(input.tools.length > 0
+          ? { tools: input.tools, toolChoice: "auto" as const }
+          : {}),
+        maxTokens: input.maxTokens,
+        reasoning: input.reasoning,
+        signal: input.signal,
+      });
 
       for await (const chunk of stream) {
         if (input.signal.aborted) {
           aborted = true;
           break;
         }
-        const delta = chunk.choices[0]?.delta;
-        if (!delta) continue;
-        if (delta.content) {
-          parser.feed(delta.content);
-          iterContent += delta.content;
+
+        if (chunk.thinking && !firstContentOrToolSeen) {
+          thinking.push(chunk.thinking);
         }
-        if (delta.tool_calls) accumulate(toolCallAcc, delta.tool_calls);
+
+        if (chunk.content) {
+          if (!firstContentOrToolSeen) {
+            firstContentOrToolSeen = true;
+            thinking.end();
+          }
+          parser.feed(chunk.content);
+          iterContent += chunk.content;
+        }
+
+        if (chunk.toolCalls) {
+          if (!firstContentOrToolSeen) {
+            firstContentOrToolSeen = true;
+            thinking.end();
+          }
+          accumulate(toolCallAcc, chunk.toolCalls);
+        }
+
         if (chunk.usage) usage = chunk.usage;
       }
     } catch (err) {
@@ -173,6 +212,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       else iterError = err instanceof Error ? err.message : String(err);
     }
 
+    thinking.end();
     parser.finish();
 
     if (aborted) break;
@@ -200,6 +240,11 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     let shouldBreak = false;
 
     for (const call of calls) {
+      if (input.signal.aborted) {
+        aborted = true;
+        break;
+      }
+
       accumulatedToolCalls.push({
         id: call.id,
         name: call.name,
@@ -211,22 +256,49 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       const tool = getTool(call.name);
       let toolResult: ToolResult;
 
-      if (!tool) {
-        toolResult = errorResult(
-          "TOOL_NOT_FOUND",
-          `Tool ${call.name} does not exist`,
-          { available: listToolNames() },
-        );
-      } else {
-        toolResult = await executeWithRepair(tool, call.args, {
-          userId: input.userId,
-          sessionId: input.sessionId,
-          messageId: input.messageId,
-          abortSignal: input.signal,
-          emit: input.sseSend,
-          emitBlock: (b) => emitter.emitAtomic(b),
-          iteration: iter,
-        });
+      try {
+        if (!tool) {
+          toolResult = errorResult(
+            "TOOL_NOT_FOUND",
+            `Tool ${call.name} does not exist`,
+            { available: listToolNames() },
+          );
+        } else {
+          toolResult = await executeWithRepair(tool, call.args, {
+            userId: input.userId,
+            sessionId: input.sessionId,
+            messageId: input.messageId,
+            abortSignal: input.signal,
+            emit: input.sseSend,
+            emitBlock: (b) => emitter.emitAtomic(b),
+            iteration: iter,
+            askClarification: input.askClarification,
+          });
+        }
+      } catch (err) {
+        if (err instanceof ClarificationTimeoutError) {
+          emitter.emitAtomic({
+            type: "text",
+            markdown:
+              "_Pertanyaan klarifikasi tidak dijawab dan dibatalkan. Kirim pesan lagi kapan saja._",
+          });
+          input.callbacks.onToolEnd(call.id, false, "clarification timeout");
+          natural = true;
+          shouldBreak = true;
+          break;
+        }
+        if (err instanceof ClarificationAbortedError) {
+          input.callbacks.onToolEnd(call.id, false, "aborted");
+          aborted = true;
+          break;
+        }
+        throw err;
+      }
+
+      if (input.signal.aborted) {
+        input.callbacks.onToolEnd(call.id, false, "aborted");
+        aborted = true;
+        break;
       }
 
       input.callbacks.onToolEnd(
@@ -249,6 +321,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       }
     }
 
+    if (aborted) break;
     if (shouldBreak) {
       natural = true;
       break;

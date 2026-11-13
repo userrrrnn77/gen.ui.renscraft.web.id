@@ -1,5 +1,4 @@
 // src/services/chat/sse.ts
-
 import type { Response } from "express";
 
 export interface SseSender {
@@ -17,14 +16,24 @@ export function setupSseHeaders(res: Response): void {
 }
 
 export function createSseSender(res: Response): SseSender {
+  const writable = (): boolean => !res.writableEnded && !res.destroyed;
+
   return {
     send: (event, data) => {
-      if (res.writableEnded) return;
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (!writable()) return;
+      try {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      } catch {
+        // Client disconnected mid-write; ignore.
+      }
     },
     ping: () => {
-      if (res.writableEnded) return;
-      res.write(": ping\n\n");
+      if (!writable()) return;
+      try {
+        res.write(": ping\n\n");
+      } catch {
+        // ignore
+      }
     },
   };
 }
@@ -33,5 +42,7 @@ export function startPing(
   sse: SseSender,
   intervalMs = 15_000,
 ): ReturnType<typeof setInterval> {
-  return setInterval(() => sse.ping(), intervalMs);
+  const timer = setInterval(() => sse.ping(), intervalMs);
+  timer.unref?.();
+  return timer;
 }

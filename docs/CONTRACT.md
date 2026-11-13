@@ -497,7 +497,16 @@ Hanya untuk konteks harness; bukan bagian streaming:
 
 - `POST /api/files/presign` → presigned PUT URL, `fileId`
 - `POST /api/files/:id/complete` → memicu ingestion, status `processing`
-- `GET /api/files/:id` → metadata + `status` (`pending | processing | ready | failed`)
+- `GET /api/files/:id` → metadata + `status` (`pending | processing | ready | failed`) + `indexStatus` (`disabled | pending | indexing | ready | failed | null`)
 - `GET /api/files/:id/download` → stream file, butuh login
 - `GET /api/files/:id/content` → preview teks (≤ 200 KB)
 - `GET /api/sessions/:id` → sesi + pesan + `blocks`
+
+### 9.1 `status` vs `indexStatus`
+
+- `status` merepresentasikan lifecycle ekstraksi:
+  - `pending` (belum upload), `processing` (ekstraksi berjalan), `ready` (ekstraksi selesai, bisa dibaca), `failed`.
+- `indexStatus` merepresentasikan lifecycle embedding (terpisah):
+  - `disabled` (`EMBEDDING_ENABLED=false`), `pending` (menunggu), `indexing` (berjalan), `ready` (selesai), `failed` (gagal), `null` (dokumen lama tanpa field).
+- File dengan `status: "ready"` **sudah dapat** dibaca / di-text-search, meskipun `indexStatus` masih `pending`/`indexing`.
+- File dengan `indexStatus: "failed"` tetap dapat dibaca & ditemukan via `search_attachment` mode `text`; hanya jalur semantic yang terpengaruh.

@@ -3,6 +3,7 @@
 import type { z } from "zod";
 import type { Types } from "mongoose";
 import type { Block } from "../blocks/schemas.js";
+import type { ClarificationQuestion } from "../orchestrator/clarification.js";
 
 export interface ToolContext {
   userId: Types.ObjectId;
@@ -14,6 +15,11 @@ export interface ToolContext {
   emitBlock: (block: Block) => void;
   /** Iterasi loop (0-based). */
   iteration: number;
+  /**
+   * Minta klarifikasi ke user (hold-and-resume). Bila tidak tersedia,
+   * tool yang butuh klarifikasi harus fallback ke perilaku lama.
+   */
+  askClarification?: (q: ClarificationQuestion) => Promise<string[]>;
 }
 
 export interface ToolResult {

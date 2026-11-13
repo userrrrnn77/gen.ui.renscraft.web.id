@@ -48,6 +48,7 @@ export interface ChatRequest {
   top_p?: number;
   max_tokens?: number;
   stream?: boolean;
+  extra?: Record<string, unknown>;
 }
 
 export interface Usage {
@@ -160,7 +161,8 @@ export async function chat(
   signal?: AbortSignal,
   timeoutMs: number = CHAT_TIMEOUT_MS,
 ): Promise<ChatResponse> {
-  const body = { ...req, stream: false };
+  const { extra, ...rest } = req;
+  const body = { ...rest, ...(extra || {}), stream: false };
 
   const ac = new AbortController();
   const timer = setTimeout(
@@ -214,7 +216,8 @@ export async function* chatStream(
   req: ChatRequest,
   externalSignal?: AbortSignal,
 ): AsyncGenerator<StreamChunk, void, void> {
-  const body = { ...req, stream: true };
+  const { extra, ...rest } = req;
+  const body = { ...rest, ...(extra || {}), stream: true };
 
   let attempt = 0;
   while (attempt < MAX_ATTEMPTS) {
@@ -270,7 +273,6 @@ export async function* chatStream(
 
         buffer += decoder.decode(value, { stream: true });
 
-        // SSE events diakhiri "\n\n" (atau "\r\n\r\n").
         while (true) {
           const match = /\r?\n\r?\n/.exec(buffer);
           if (!match) break;

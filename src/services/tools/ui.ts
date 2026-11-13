@@ -1,4 +1,4 @@
-// src/services/tools/ui.ts
+// src/tools/ui.ts
 
 import { z } from "zod";
 import { registerTool, okResult } from "./registry.js";
@@ -125,10 +125,25 @@ registerTool({
   name: "render_choices",
   kind: "ui",
   description:
-    "Tampilkan pertanyaan pilihan ke user. Giliran akan diakhiri; klik user jadi pesan berikutnya. Gunakan HANYA jika benar-benar ambigu.",
+    "Tampilkan pertanyaan pilihan ke user. Giliran akan ditahan; jawaban user dikirim sebagai hasil tool dan lanjutkan jawaban setelahnya. Gunakan HANYA jika benar-benar ambigu.",
   schema: RenderChoicesSchema,
   async run(args, ctx) {
     const a = RenderChoicesSchema.parse(args);
+
+    // Jalur baru: hold-and-resume lewat orchestrator (Phase 1).
+    // Block `choices` di-emit oleh askClarification di dalam coordinator,
+    // bukan dari sini — agar index tetap monoton dan answer terisi.
+    if (ctx.askClarification) {
+      const answer = await ctx.askClarification({
+        question: a.question,
+        multi: a.multi ?? false,
+        options: a.options,
+      });
+      return okResult({ answer });
+    }
+
+    // Fallback (tidak ada askClarification — kontrak lama): emit block,
+    // endTurn. Klien mengirim jawaban sebagai pesan baru.
     ctx.emitBlock({
       type: "choices",
       question: a.question,

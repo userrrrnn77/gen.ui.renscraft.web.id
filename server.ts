@@ -7,12 +7,26 @@ import { connectToDatabase } from "./src/db/connect.js";
 import { buildApp } from "./src/app.js";
 import { closePdfEngine } from "./src/services/pdf/engine.js";
 import { startCleanup, stopCleanup } from "./src/services/jobs/cleanup.js";
-import { abortAllStreams, activeStreamCount } from "./src/services/chat/activeStreams.js";
-import { drainIngestion } from "./src/services/ingest/index.js";
+import {
+  abortAllStreams,
+  activeStreamCount,
+} from "./src/services/chat/activeStreams.js";
+import {
+  drainIngestion,
+  resumePendingEmbeddings,
+  resumePendingIngestion,
+} from "./src/services/ingest/index.js";
 
 async function bootstrap(): Promise<void> {
   await connectToDatabase();
   startCleanup();
+
+  // Recover state from a previous crash:
+  //   1. Files stuck at status="processing" (extraction mid-flight)
+  //   2. Files with indexStatus="pending"/"indexing" (embedding mid-flight)
+  // Both are idempotent and non-blocking; actual work enqueues.
+  await resumePendingIngestion();
+  await resumePendingEmbeddings();
 
   const app = buildApp();
   const server = app.listen(env.PORT, () => {
@@ -34,12 +48,10 @@ async function bootstrap(): Promise<void> {
     }, 15_000);
     forceTimer.unref?.();
 
-    // 1. Stop accepting new connections
     server.close((closeErr) => {
       if (closeErr) logger.error({ err: closeErr }, "http server close error");
     });
 
-    // 2. Abort active streams, wait up to 10s
     abortAllStreams();
     const drainDeadline = Date.now() + 10_000;
     while (activeStreamCount() > 0 && Date.now() < drainDeadline) {
@@ -52,24 +64,20 @@ async function bootstrap(): Promise<void> {
       );
     }
 
-    // 3. Drain ingestion
     try {
       await drainIngestion(10_000);
     } catch (err) {
       logger.error({ err }, "drainIngestion error");
     }
 
-    // 4. Close PDF engine
     try {
       await closePdfEngine();
     } catch (err) {
       logger.error({ err }, "closePdfEngine error");
     }
 
-    // 5. Stop cleanup
     stopCleanup();
 
-    // 6. Mongo
     try {
       await mongoose.disconnect();
     } catch (err) {
@@ -84,7 +92,6 @@ async function bootstrap(): Promise<void> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
-
 
 bootstrap().catch((err: unknown) => {
   logger.fatal({ err }, "bootstrap failed");

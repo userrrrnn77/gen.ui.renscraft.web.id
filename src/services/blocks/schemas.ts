@@ -87,6 +87,7 @@ export const CardBlock = z.object({
 
 export const ChoicesBlock = z.object({
   type: z.literal("choices"),
+  questionId: z.string().optional(),
   question: z.string(),
   multi: z.boolean().default(false),
   options: z
@@ -98,6 +99,7 @@ export const ChoicesBlock = z.object({
     )
     .min(2)
     .max(6),
+  answer: z.array(z.string()).optional(),
 });
 
 export const Block = z.discriminatedUnion("type", [

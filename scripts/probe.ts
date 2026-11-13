@@ -1,7 +1,7 @@
 // scripts/probe.ts
 
 import sharp from "sharp";
-import { chat, chatStream } from "../src/llm/nvidiaClient.js";
+import { chat, chatStream } from "../src/services/llm/nvidiaClient.js";
 import { env } from "../src/config/env.js";
 
 async function test1(): Promise<boolean> {

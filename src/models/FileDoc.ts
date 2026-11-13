@@ -1,9 +1,14 @@
 // src/models/FileDoc.ts
-
 import mongoose, { Schema, Types, type Model } from "mongoose";
 
 export type FileOrigin = "upload" | "generated";
 export type FileStatus = "pending" | "processing" | "ready" | "failed";
+export type FileIndexStatus =
+  | "disabled"
+  | "pending"
+  | "indexing"
+  | "ready"
+  | "failed";
 export type StorageDriver = "r2" | "local" | "cloudinary";
 
 export interface IFileDocStorage {
@@ -38,6 +43,7 @@ export interface IFileDoc {
   parentFileId?: Types.ObjectId | null;
   storage: IFileDocStorage;
   status: FileStatus;
+  indexStatus?: FileIndexStatus;
   error?: string;
   extract?: IFileDocExtract;
   digest?: IFileDocDigest;
@@ -88,7 +94,6 @@ const fileDocSchema = new Schema<IFileDoc>(
     name: { type: String, required: true },
     mime: { type: String, required: true },
     size: { type: Number, required: true },
-    // sha256 diisi saat ingestion (Fase 5) karena file tidak melalui server.
     sha256: { type: String, default: "" },
     version: { type: Number, default: 1 },
     parentFileId: { type: Types.ObjectId, ref: "FileDoc", default: null },
@@ -97,6 +102,11 @@ const fileDocSchema = new Schema<IFileDoc>(
       type: String,
       enum: ["pending", "processing", "ready", "failed"],
       default: "pending",
+    },
+    indexStatus: {
+      type: String,
+      enum: ["disabled", "pending", "indexing", "ready", "failed"],
+      default: undefined,
     },
     error: String,
     extract: { type: extractSchema, default: undefined },

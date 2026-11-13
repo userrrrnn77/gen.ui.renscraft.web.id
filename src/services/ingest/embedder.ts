@@ -102,9 +102,13 @@ export async function embedTexts(
  */
 export async function embedAndStoreChunks(
   chunks: Array<{ _id: Types.ObjectId; text: string }>,
-): Promise<void> {
-  if (!env.EMBEDDING_ENABLED || chunks.length === 0) return;
+): Promise<{ embedded: number; failed: number }> {
+  if (!env.EMBEDDING_ENABLED || chunks.length === 0) {
+    return { embedded: 0, failed: 0 };
+  }
 
+  let embedded = 0;
+  let failed = 0;
   const batchSize = env.EMBEDDING_BATCH_SIZE;
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
@@ -126,17 +130,17 @@ export async function embedAndStoreChunks(
           ),
         ),
       );
+      embedded += batch.length;
     } catch (err) {
+      failed += batch.length;
       logger.warn(
-        {
-          err,
-          batchStart: i,
-          batchSize: batch.length,
-        },
+        { err, batchStart: i, batchSize: batch.length },
         "embed batch failed; chunks remain unembedded",
       );
     }
   }
+
+  return { embedded, failed };
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {

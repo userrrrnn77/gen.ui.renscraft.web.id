@@ -1,11 +1,12 @@
 // src/services/tools/saveGenerated.ts
-
 import { Types } from "mongoose";
-import { FileDocModel } from "../../models/FileDoc.js";
+import { FileDocModel, type FileIndexStatus } from "../../models/FileDoc.js";
 import { ChunkModel } from "../../models/Chunk.js";
 import { getStorage, pickPrefix } from "../../storage/index.js";
 import { chunkText } from "../ingest/chunker.js";
 import { embedAndStoreChunks } from "../ingest/embedder.js";
+import { env } from "../../config/env.js";
+import { logger } from "../../config/logger.js";
 
 const CODE_EXTS = new Set([
   "ts",
@@ -101,12 +102,7 @@ export interface SaveGeneratedInput {
   name: string;
   mime: string;
   buf: Buffer;
-  /** Jika diisi, override summaryLine (tidak pakai first-line otomatis). */
   summaryLine?: string;
-  /**
-   * Jika true, pecah isi (text) ke Chunk agar search_attachment bisa
-   * menemukannya. Default: mengikuti isTextish(mime, name).
-   */
   doChunk?: boolean;
 }
 
@@ -140,6 +136,9 @@ export async function saveGenerated(
     prefix,
   );
 
+  const shouldChunk = input.doChunk ?? isTextish(input.mime, input.name);
+  const willIndex = shouldChunk && env.EMBEDDING_ENABLED;
+
   const doc = await FileDocModel.create({
     userId: input.userId,
     sessionId: input.sessionId,
@@ -152,9 +151,9 @@ export async function saveGenerated(
     parentFileId: parentId,
     storage: ref,
     status: "ready",
+    indexStatus: willIndex ? "pending" : "disabled",
   });
 
-  const shouldChunk = input.doChunk ?? isTextish(input.mime, input.name);
   let summaryLine = input.summaryLine;
 
   if (shouldChunk) {
@@ -169,9 +168,27 @@ export async function saveGenerated(
           text: t,
         })),
       );
-      void embedAndStoreChunks(
-        inserted.map((c) => ({ _id: c._id, text: c.text })),
-      ).catch(() => {});
+
+      if (env.EMBEDDING_ENABLED) {
+        const fileId = doc._id;
+        void embedAndStoreChunks(
+          inserted.map((c) => ({ _id: c._id, text: c.text })),
+        )
+          .then(async (result) => {
+            const finalStatus: FileIndexStatus =
+              result.embedded === 0 ? "failed" : "ready";
+            await FileDocModel.updateOne(
+              { _id: fileId },
+              { $set: { indexStatus: finalStatus } },
+            );
+          })
+          .catch((err: unknown) => {
+            logger.warn(
+              { err, fileId: fileId.toString() },
+              "saveGenerated embedding failed",
+            );
+          });
+      }
     }
     if (summaryLine === undefined) {
       const firstLine = text.split("\n").find((l) => l.trim().length > 0) ?? "";

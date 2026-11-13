@@ -16,6 +16,14 @@ export interface IToolCall {
   argsJson: string;
 }
 
+export interface IMessageSource {
+  n: number;
+  fileId: string;
+  name: string;
+  idx: number;
+  snippet: string;
+}
+
 export interface IMessageLlm {
   toolCalls?: IToolCall[];
   toolCallId?: string;
@@ -27,6 +35,22 @@ export interface ILlmUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+}
+
+export interface IMessage {
+  sessionId: Types.ObjectId;
+  userId: Types.ObjectId;
+  role: MessageRole;
+  blocks: Block[];
+  attachmentIds: Types.ObjectId[];
+  llm?: IMessageLlm;
+  status: MessageStatus;
+  usage?: ILlmUsage;
+  sources?: IMessageSource[];
+  tokenEstimate: number;
+  summarized: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export type MessageRole = "user" | "assistant" | "tool";
@@ -75,6 +99,17 @@ const usageSchema = new Schema<ILlmUsage>(
   { _id: false },
 );
 
+const sourceSchema = new Schema<IMessageSource>(
+  {
+    n: { type: Number, required: true },
+    fileId: { type: String, required: true },
+    name: { type: String, required: true },
+    idx: { type: Number, required: true },
+    snippet: { type: String, required: true },
+  },
+  { _id: false },
+);
+
 const messageSchema = new Schema<IMessage>(
   {
     sessionId: { type: Types.ObjectId, ref: "Session", required: true },
@@ -99,6 +134,7 @@ const messageSchema = new Schema<IMessage>(
       default: "done",
     },
     usage: { type: usageSchema, default: undefined },
+    sources: { type: [sourceSchema], default: undefined },
     tokenEstimate: { type: Number, default: 0 },
     summarized: { type: Boolean, default: false },
   },
@@ -106,6 +142,7 @@ const messageSchema = new Schema<IMessage>(
 );
 
 messageSchema.index({ sessionId: 1, createdAt: 1 });
+messageSchema.index({ attachmentIds: 1 });
 
 const MAX_TOOL_RESULT_CHARS = 8192;
 

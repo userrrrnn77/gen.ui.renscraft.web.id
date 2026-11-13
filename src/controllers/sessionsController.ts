@@ -40,6 +40,7 @@ const GetQuery = z.object({
 interface SessionLike {
   _id: unknown;
   title: string;
+  titleAuto?: boolean;
   pinned: boolean;
   archived: boolean;
   lastMessageAt?: Date | null;
@@ -49,6 +50,7 @@ interface SessionLike {
 function serializeSession(s: SessionLike): {
   id: string;
   title: string;
+  titleAuto: boolean;
   pinned: boolean;
   archived: boolean;
   lastMessageAt: string | null;
@@ -57,6 +59,7 @@ function serializeSession(s: SessionLike): {
   return {
     id: String(s._id),
     title: s.title,
+    titleAuto: s.titleAuto ?? true,
     pinned: s.pinned,
     archived: s.archived,
     lastMessageAt: s.lastMessageAt?.toISOString() ?? null,
@@ -132,6 +135,7 @@ export async function getSession(req: Request, res: Response): Promise<void> {
       role: m.role,
       blocks: m.blocks,
       status: m.status,
+      ...(m.sources !== undefined ? { sources: m.sources } : {}),
       createdAt: m.createdAt.toISOString(),
     })),
     nextCursor,

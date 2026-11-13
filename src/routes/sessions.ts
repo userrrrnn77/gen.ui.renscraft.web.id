@@ -8,7 +8,10 @@ import {
   patchSession,
   deleteSession,
 } from "../controllers/sessionsController.js";
-import { postMessage } from "../controllers/messagesController.js";
+import {
+  postMessage,
+  respondClarification,
+} from "../controllers/messagesController.js";
 import { messageLimiter } from "../middleware/rateLimit.js";
 
 export const sessionsRouter = Router();
@@ -19,3 +22,4 @@ sessionsRouter.get("/:id", getSession);
 sessionsRouter.patch("/:id", patchSession);
 sessionsRouter.delete("/:id", deleteSession);
 sessionsRouter.post("/:id/messages", messageLimiter, postMessage);
+sessionsRouter.post("/:id/respond", messageLimiter, respondClarification);

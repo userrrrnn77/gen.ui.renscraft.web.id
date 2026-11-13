@@ -15,15 +15,17 @@ export { getTool, listTools, listToolNames } from "./registry.js";
 export type { ToolContext, ToolResult, ToolDef } from "./registry.js";
 
 export function buildToolDefinitions(): ToolDefinition[] {
-  return listTools().map((t) => ({
-    type: "function",
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: z.toJSONSchema(t.schema, {
-        target: "draft-7",
-        io: "input",
-      }) as Record<string, unknown>,
-    },
-  }));
+  return listTools()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((t) => ({
+      type: "function",
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: z.toJSONSchema(t.schema, {
+          target: "draft-7",
+          io: "input",
+        }) as Record<string, unknown>,
+      },
+    }));
 }

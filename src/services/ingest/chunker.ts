@@ -1,12 +1,14 @@
+// REPLACE: full file (TARGET/OVERLAP dari env + separator "\n" overlap)
 // src/services/ingest/chunker.ts
+import { env } from "../../config/env.js";
 
-const TARGET = 1000;
-const OVERLAP = 100;
+const TARGET = env.CHUNK_TARGET_CHARS;
+const OVERLAP = env.CHUNK_OVERLAP_CHARS;
 
 /**
- * Pecah teks jadi chunk ~1000 char dengan overlap 100, utamakan batas
- * paragraf/heading. Heading markdown (#, ##) diperlakukan sebagai titik
- * potong tambahan.
+ * Pecah teks jadi chunk ~TARGET char dengan overlap OVERLAP, utamakan
+ * batas paragraf/heading. Heading markdown (#, ##) diperlakukan sebagai
+ * titik potong tambahan.
  */
 export function chunkText(text: string): string[] {
   const clean = text.replace(/\r\n/g, "\n");
@@ -36,13 +38,13 @@ export function chunkText(text: string): string[] {
   }
   if (buf) blocks.push(buf);
 
-  // Beri overlap antar blok yang berdampingan.
+  // Beri overlap antar blok yang berdampingan (dengan pemisah "\n").
   if (blocks.length <= 1) return blocks;
   const out: string[] = [blocks[0]];
   for (let i = 1; i < blocks.length; i++) {
     const prev = blocks[i - 1];
     const tail = prev.length > OVERLAP ? prev.slice(-OVERLAP) : prev;
-    out.push(`${tail}${blocks[i]}`);
+    out.push(`${tail}\n${blocks[i]}`);
   }
   return out;
 }

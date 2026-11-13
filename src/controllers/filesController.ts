@@ -1,11 +1,11 @@
 // src/controllers/filesController.ts
-
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { Types } from "mongoose";
 import { fileTypeFromBuffer } from "file-type";
 import { FileDocModel } from "../models/FileDoc.js";
 import { SessionModel } from "../models/Session.js";
+import { ChunkModel } from "../models/Chunk.js";
 import { AppError } from "../middleware/error.js";
 import { getUserId } from "../middleware/auth.js";
 import { parseObjectIdParam as parseFileId } from "../utils/params.js";
@@ -17,8 +17,6 @@ import { enqueueIngestion } from "../services/ingest/index.js";
 const PRESIGN_TTL_SEC = 600;
 const MAGIC_BYTES_LEN = 4100;
 const MAX_CONTENT_PREVIEW_BYTES = 200 * 1024;
-
-// ─── Mime helpers ──────────────────────────────────────────────────────────
 
 const TEXT_EXTS = new Set([
   "txt",
@@ -107,8 +105,6 @@ function basicMimeCheck(name: string, mime: string): void {
   }
 }
 
-// ─── Schemas ───────────────────────────────────────────────────────────────
-
 const PresignBody = z.object({
   sessionId: z.string().refine((v) => Types.ObjectId.isValid(v), {
     message: "Invalid sessionId",
@@ -121,8 +117,6 @@ const PresignBody = z.object({
     .regex(/^[a-f0-9]{64}$/i)
     .optional(),
 });
-
-// ─── Presign ───────────────────────────────────────────────────────────────
 
 export async function presignUpload(
   req: Request,
@@ -167,6 +161,7 @@ export async function presignUpload(
     parentFileId: null,
     storage: { driver: "r2", key: presigned.key },
     status: "pending",
+    indexStatus: env.EMBEDDING_ENABLED ? "pending" : "disabled",
   });
 
   res.status(201).json({
@@ -177,8 +172,6 @@ export async function presignUpload(
     requiredHeaders: { "Content-Type": body.mime },
   });
 }
-
-// ─── Complete ──────────────────────────────────────────────────────────────
 
 export async function completeUpload(
   req: Request,
@@ -200,7 +193,6 @@ export async function completeUpload(
     await doc.save();
   };
 
-  // 1. Objek benar-benar ada di R2.
   const head = await storage.head(doc.storage.key);
   if (!head) {
     await markFailed("Object not found in storage");
@@ -211,7 +203,6 @@ export async function completeUpload(
     );
   }
 
-  // 2. Size aktual harus cocok dan ≤ MAX_UPLOAD_MB.
   const maxBytes = env.MAX_UPLOAD_MB * 1024 * 1024;
   if (head.size > maxBytes) {
     await storage.delete(doc.storage.key).catch(() => {});
@@ -230,7 +221,6 @@ export async function completeUpload(
     );
   }
 
-  // 3. Magic byte check (range GET 4KB).
   let detectedMime = doc.mime;
   try {
     const magic = await storage.readBytes(doc.storage.key, MAGIC_BYTES_LEN);
@@ -273,10 +263,10 @@ export async function completeUpload(
     throw new AppError("VERIFY_FAILED", 500, "File verification failed");
   }
 
-  // 4. Sukses → 'processing'. Ingestion async akan ubah ke 'ready'.
   doc.status = "processing";
   doc.mime = detectedMime;
   doc.error = undefined;
+  doc.indexStatus = env.EMBEDDING_ENABLED ? "pending" : "disabled";
   await doc.save();
 
   enqueueIngestion(doc._id.toString());
@@ -287,10 +277,9 @@ export async function completeUpload(
     mime: doc.mime,
     size: doc.size,
     status: doc.status,
+    indexStatus: doc.indexStatus ?? null,
   });
 }
-
-// ─── Meta ──────────────────────────────────────────────────────────────────
 
 export async function getFileMeta(req: Request, res: Response): Promise<void> {
   const id = parseFileId(req.params.id);
@@ -308,14 +297,13 @@ export async function getFileMeta(req: Request, res: Response): Promise<void> {
     version: doc.version,
     origin: doc.origin,
     status: doc.status,
+    indexStatus: doc.indexStatus ?? null,
     error: doc.error ?? null,
     extract: doc.extract ?? null,
     summaryLine: doc.summaryLine ?? null,
     createdAt: doc.createdAt.toISOString(),
   });
 }
-
-// ─── Download ──────────────────────────────────────────────────────────────
 
 function asciiFallback(name: string): string {
   return name.replace(/[^\x20-\x7e]+/g, "_").replace(/["\\]/g, "_");
@@ -361,8 +349,6 @@ export async function downloadFile(req: Request, res: Response): Promise<void> {
   }
 }
 
-// ─── Content preview ───────────────────────────────────────────────────────
-
 export async function getFileContent(
   req: Request,
   res: Response,
@@ -392,8 +378,13 @@ export async function getFileContent(
   res.json({ text, truncated, size: doc.size });
 }
 
-// ─── Delete ────────────────────────────────────────────────────────────────
-
+/**
+ * Hapus file beserta seluruh chunk-nya. Urutan:
+ *   1. Hapus FileDoc dulu → memicu existence check di ingestion abort.
+ *   2. Hapus chunks → search_attachment tidak bisa menemukan kontennya.
+ *   3. Best-effort hapus objek R2.
+ * Idempotent: pemanggilan ulang mengembalikan 404 (safe).
+ */
 export async function deleteFile(req: Request, res: Response): Promise<void> {
   const id = parseFileId(req.params.id);
   const doc = await FileDocModel.findOne({
@@ -402,12 +393,17 @@ export async function deleteFile(req: Request, res: Response): Promise<void> {
   }).lean();
   if (!doc) throw AppError.notFound();
 
+  await FileDocModel.deleteOne({ _id: doc._id });
+  await ChunkModel.deleteMany({ fileId: doc._id });
+
   try {
     await getStorage().delete(doc.storage.key);
   } catch (err) {
-    logger.warn({ err, key: doc.storage.key }, "r2 delete failed");
+    logger.warn(
+      { err, key: doc.storage.key, fileId: doc._id.toString() },
+      "r2 delete failed; file doc + chunks already removed",
+    );
   }
 
-  await FileDocModel.deleteOne({ _id: doc._id });
   res.status(204).end();
 }

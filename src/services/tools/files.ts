@@ -24,6 +24,15 @@ registerTool({
   schema: CreateFileSchema,
   async run(args, ctx) {
     const a = CreateFileSchema.parse(args);
+
+    // Tolak kalau model ngasal masukin ObjectId (24 char hex) sebagai nama file
+    if (/^[a-f0-9]{24}$/i.test(a.name)) {
+      return errorResult(
+        "INVALID_NAME",
+        "File name cannot be a hex ID. Provide a descriptive name with an extension.",
+      );
+    }
+
     const mime = a.mime ?? guessMime(a.name);
     const buf = Buffer.from(a.content, "utf-8");
 

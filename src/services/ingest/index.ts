@@ -1,7 +1,6 @@
 // src/services/ingest/index.ts
-
 import { Types } from "mongoose";
-import { FileDocModel } from "../../models/FileDoc.js";
+import { FileDocModel, type FileIndexStatus } from "../../models/FileDoc.js";
 import { ChunkModel } from "../../models/Chunk.js";
 import { getStorage } from "../../storage/index.js";
 import { env, SUMMARY_MODEL } from "../../config/env.js";
@@ -80,6 +79,43 @@ async function generateSummaryLine(
   }
 }
 
+/**
+ * Jalankan embedding untuk file dan update `indexStatus`.
+ * Selalu menulis status final (`ready` atau `failed`) — bahkan bila
+ * `updateOne` sendiri gagal, catch di bawah men-set `failed` (best-effort).
+ * Ini mencegah file stuck di `indexing` selamanya.
+ */
+async function runEmbeddingForFile(
+  fileId: Types.ObjectId,
+  chunks: Array<{ _id: Types.ObjectId; text: string }>,
+): Promise<void> {
+  try {
+    await FileDocModel.updateOne(
+      { _id: fileId },
+      { $set: { indexStatus: "indexing" } },
+    );
+    const result = await embedAndStoreChunks(chunks);
+    const finalStatus: FileIndexStatus =
+      result.embedded === 0 ? "failed" : "ready";
+    await FileDocModel.updateOne(
+      { _id: fileId },
+      { $set: { indexStatus: finalStatus } },
+    );
+  } catch (err) {
+    logger.warn(
+      { err, fileId: fileId.toString() },
+      "runEmbeddingForFile failed; marking as failed",
+    );
+    await FileDocModel.updateOne(
+      { _id: fileId },
+      { $set: { indexStatus: "failed" } },
+    ).catch(() => {
+      // Kalau update status pun gagal (mis. file sudah dihapus), tidak
+      // ada yang bisa dilakukan. Resume berikutnya akan sweep.
+    });
+  }
+}
+
 async function processOne(fileId: string): Promise<void> {
   await sem.acquire();
   try {
@@ -107,6 +143,20 @@ async function processOne(fileId: string): Promise<void> {
         ? await generateSummaryLine({ name: doc.name, mime: doc.mime }, text)
         : ex.digest?.summary;
 
+      const stillProcessing = await FileDocModel.findOne({
+        _id: doc._id,
+        status: "processing",
+      })
+        .select({ _id: 1 })
+        .lean();
+      if (!stillProcessing) {
+        logger.info(
+          { fileId },
+          "ingestion aborted (file deleted or status changed during extraction)",
+        );
+        return;
+      }
+
       doc.extract = {
         kind: ex.kind,
         chars: text.length,
@@ -116,6 +166,8 @@ async function processOne(fileId: string): Promise<void> {
       };
       if (ex.digest) doc.digest = ex.digest;
       if (summaryLine) doc.summaryLine = summaryLine;
+
+      let insertedChunks: Array<{ _id: Types.ObjectId; text: string }> = [];
 
       if (text) {
         const chunks = chunkText(text);
@@ -129,29 +181,46 @@ async function processOne(fileId: string): Promise<void> {
               text: t,
             })),
           );
-          // Fire-and-forget embedding. Chunk tetap tersimpan tanpa
-          // embedding kalau gagal — search_attachment fallback ke $text.
-          void embedAndStoreChunks(
-            inserted.map((c) => ({ _id: c._id, text: c.text })),
-          ).catch((err: unknown) => {
-            logger.warn(
-              { err, fileId: doc._id.toString() },
-              "embedChunks fire-and-forget failed",
+          insertedChunks = inserted.map((c) => ({
+            _id: c._id,
+            text: c.text,
+          }));
+
+          const stillExists = await FileDocModel.exists({ _id: doc._id });
+          if (!stillExists) {
+            await ChunkModel.deleteMany({ fileId: doc._id });
+            logger.info(
+              { fileId },
+              "ingestion aborted: file deleted during chunk insert",
             );
-          });
+            return;
+          }
         }
       }
 
       doc.status = "ready";
       doc.error = undefined;
+      doc.indexStatus = env.EMBEDDING_ENABLED ? "pending" : "disabled";
       await doc.save();
       logger.info({ fileId, kind: ex.kind, chars: text.length }, "ingested");
+
+      if (insertedChunks.length > 0 && env.EMBEDDING_ENABLED) {
+        const embedPromise = runEmbeddingForFile(
+          doc._id,
+          insertedChunks,
+        ).finally(() => inflight.delete(embedPromise));
+        inflight.add(embedPromise);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err, fileId }, "ingestion failed");
-      doc.status = "failed";
-      doc.error = msg;
-      await doc.save();
+      try {
+        doc.status = "failed";
+        doc.error = msg;
+        await doc.save();
+      } catch {
+        // FileDoc mungkin sudah dihapus; abaikan.
+      }
     }
   } finally {
     sem.release();
@@ -164,8 +233,83 @@ export function enqueueIngestion(fileId: string): void {
 }
 
 /**
+ * Startup recovery untuk file yang berhenti di tengah ingestion / embedding
+ * karena crash. Idempotent — aman dipanggil berulang.
+ *
+ * Single-instance assumption (Modular Monolith per PRD): semua status
+ * `pending`/`indexing` saat startup dianggap stale. Multi-instance deployment
+ * akan butuh lease/lock (di luar scope).
+ */
+export async function resumePendingEmbeddings(): Promise<void> {
+  if (!env.EMBEDDING_ENABLED) return;
+  try {
+    const candidates = await FileDocModel.find({
+      status: "ready",
+      indexStatus: { $in: ["pending", "indexing"] },
+    })
+      .select({ _id: 1 })
+      .lean();
+
+    if (candidates.length === 0) return;
+    logger.info(
+      { count: candidates.length },
+      "resuming embedding for pending/indexing files",
+    );
+
+    for (const f of candidates) {
+      const fileId = f._id;
+      const chunks = await ChunkModel.find({ fileId })
+        .select({ _id: 1, text: 1 })
+        .lean();
+
+      if (chunks.length === 0) {
+        // File tidak punya chunks — biasanya extraction kosong. Bukan
+        // kegagalan; set disabled agar tidak di-resume terus-menerus.
+        await FileDocModel.updateOne(
+          { _id: fileId },
+          { $set: { indexStatus: "disabled" } },
+        );
+        continue;
+      }
+
+      const p = runEmbeddingForFile(
+        fileId,
+        chunks.map((c) => ({ _id: c._id, text: c.text })),
+      ).finally(() => inflight.delete(p));
+      inflight.add(p);
+    }
+  } catch (err) {
+    logger.warn({ err }, "resumePendingEmbeddings failed");
+  }
+}
+
+/**
+ * Re-enqueue files stuck at status="processing" (typically from a crash
+ * during a previous run). Idempotent: processOne re-checks status before
+ * doing any work, and a file whose processing completes between calls is
+ * safely skipped. Call once at bootstrap.
+ */
+export async function resumePendingIngestion(): Promise<void> {
+  try {
+    const stuck = await FileDocModel.find({ status: "processing" })
+      .select({ _id: 1 })
+      .lean();
+    if (stuck.length === 0) return;
+    logger.info(
+      { count: stuck.length },
+      "resuming ingestion for stuck processing files",
+    );
+    for (const f of stuck) {
+      enqueueIngestion(f._id.toString());
+    }
+  } catch (err) {
+    logger.warn({ err }, "resumePendingIngestion failed");
+  }
+}
+
+/**
  * Tunggu semua file berstatus ready/failed, timeout MAX.
- * Polling 500ms (ingestion lewat proses terpisah di queue).
+ * Throw bila salah satu fileId sudah tidak ada (mis. dihapus user).
  */
 export async function waitForReady(
   fileIds: string[],
@@ -180,6 +324,9 @@ export async function waitForReady(
     const docs = await FileDocModel.find({ _id: { $in: oids } })
       .select({ status: 1 })
       .lean();
+    if (docs.length < oids.length) {
+      throw new Error("attachment file no longer exists");
+    }
     if (docs.every((d) => d.status === "ready" || d.status === "failed")) {
       return;
     }
