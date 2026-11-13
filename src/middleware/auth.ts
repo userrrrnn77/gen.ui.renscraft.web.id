@@ -2,7 +2,7 @@
 
 import type { RequestHandler, Response } from "express";
 import { Types } from "mongoose";
-import { verifyToken, COOKIE_NAME } from "../auth/tokens.js";
+import { verifyToken, COOKIE_NAME } from "../services/auth/tokens.js";
 import { UserModel } from "../models/User.js";
 import { AppError } from "./error.js";
 

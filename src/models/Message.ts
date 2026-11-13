@@ -7,7 +7,7 @@ import mongoose, {
   type HydratedDocument,
   type SchemaDefinitionProperty,
 } from "mongoose";
-import { Block } from "../blocks/schemas.js";
+import { Block } from "../services/blocks/schemas.js";
 import { z } from "zod";
 
 export interface IToolCall {

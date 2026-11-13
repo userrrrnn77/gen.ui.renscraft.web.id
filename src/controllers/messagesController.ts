@@ -10,21 +10,21 @@ import { FileDocModel } from "../models/FileDoc.js";
 import { AppError } from "../middleware/error.js";
 import { getUserId } from "../middleware/auth.js";
 import { parseObjectIdParam as parseSessionId } from "../utils/params.js";
-import { setupSseHeaders, createSseSender, startPing } from "../chat/sse.js";
+import { setupSseHeaders, createSseSender, startPing } from "../services/chat/sse.js";
 import {
   buildContext,
   blocksToText,
   estimateTokens,
-} from "../chat/contextBuilder.js";
-import { runAgent } from "../chat/agentLoop.js";
-import { generateTitle } from "../chat/titler.js";
-import { buildToolDefinitions, listToolNames } from "../tools/index.js";
+} from "../services/chat/contextBuilder.js";
+import { runAgent } from "../services/chat/agentLoop.js";
+import { generateTitle } from "../services/chat/titler.js";
+import { buildToolDefinitions, listToolNames } from "../services/tools/index.js";
 import { logger } from "../config/logger.js";
-import { waitForReady } from "../ingest/index.js";
-import { maybeSummarize } from "../chat/summarizer.js";
-import { checkSafety } from "../safety/guard.js";
-import { registerStream, unregisterStream } from "../chat/activeStreams.js";
-import type { Block } from "../blocks/schemas.js";
+import { waitForReady } from "../services/ingest/index.js";
+import { maybeSummarize } from "../services/chat/summarizer.js";
+import { checkSafety } from "../services/safety/guard.js";
+import { registerStream, unregisterStream } from "../services/chat/activeStreams.js";
+import type { Block } from "../services/blocks/schemas.js";
 
 const PostMessageBody = z.object({
   text: z.string().min(1).max(100_000),

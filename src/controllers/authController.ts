@@ -6,7 +6,7 @@ import { env } from "../config/env.js";
 import { UserModel } from "../models/User.js";
 import { AppError } from "../middleware/error.js";
 import { getUserId } from "../middleware/auth.js";
-import { signToken, COOKIE_NAME, COOKIE_MAX_AGE_MS } from "../auth/tokens.js";
+import { signToken, COOKIE_NAME, COOKIE_MAX_AGE_MS } from "../services/auth/tokens.js";
 
 // ─── Schemas ───────────────────────────────────────────────────────────────
 

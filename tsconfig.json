@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
@@ -12,7 +13,19 @@
     "rootDir": ".",
     "outDir": "dist",
     "types": ["bun"],
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+
+    // 1. baseUrl Wajib ada buat nemenin paths
+    "baseUrl": ".",
+
+    // 2. paths HARUS di dalam compilerOptions
+    "paths": {
+      // 3. Arahin ke dalam folder src/ (asumsi folder lu di dalem src)
+      "@services/*": ["src/services/*"],
+      "@config/*": ["src/config/*"],
+      "@models/*": ["src/models/*"],
+      "@db/*": ["src/db/*"]
+    }
   },
   "include": ["src/**/*", "api/**/*", "server.ts"],
   "exclude": ["node_modules", "dist"]

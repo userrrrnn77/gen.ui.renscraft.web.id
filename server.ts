@@ -5,10 +5,10 @@ import { env } from "./src/config/env.js";
 import { logger } from "./src/config/logger.js";
 import { connectToDatabase } from "./src/db/connect.js";
 import { buildApp } from "./src/app.js";
-import { closePdfEngine } from "./src/pdf/engine.js";
-import { startCleanup, stopCleanup } from "./src/jobs/cleanup.js";
-import { abortAllStreams, activeStreamCount } from "./src/chat/activeStreams.js";
-import { drainIngestion } from "./src/ingest/index.js";
+import { closePdfEngine } from "./src/services/pdf/engine.js";
+import { startCleanup, stopCleanup } from "./src/services/jobs/cleanup.js";
+import { abortAllStreams, activeStreamCount } from "./src/services/chat/activeStreams.js";
+import { drainIngestion } from "./src/services/ingest/index.js";
 
 async function bootstrap(): Promise<void> {
   await connectToDatabase();

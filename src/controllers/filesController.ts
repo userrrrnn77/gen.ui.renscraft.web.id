@@ -12,7 +12,7 @@ import { parseObjectIdParam as parseFileId } from "../utils/params.js";
 import { getStorage, pickPrefix } from "../storage/index.js";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
-import { enqueueIngestion } from "../ingest/index.js";
+import { enqueueIngestion } from "../services/ingest/index.js";
 
 const PRESIGN_TTL_SEC = 600;
 const MAGIC_BYTES_LEN = 4100;
